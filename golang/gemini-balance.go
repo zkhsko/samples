@@ -1,6 +1,6 @@
 /**
  * CGO_ENABLED=0 GOOS=linux GOARCH=amd64 ~/Software/go/bin/go build main.go
- * ~/Software/go/bin/go run main.go -host localhost -port 3000 -file keys.txt
+ * ~/Software/go/bin/go run main.go -host localhost -port 3000 -path ~/Desktop/
  */
  /**
  server {
@@ -27,6 +27,7 @@
         # proxy_ssl_server_name on;
         # proxy_ssl_name gemini-key-pool.dongpo-li.workers.dev;
         proxy_http_version      1.1;
+        # proxy_set_header        X-Keys-File keys1.txt;
         proxy_set_header        Connection keep-alive;
         proxy_set_header        Content-Length "";
         proxy_read_timeout      3600;
@@ -79,28 +80,61 @@ import (
 	"net/http"
 	"os"
 	"strings"
+    "sync"
 )
 
 var keys []string
 
 var serverHost string
 var serverPort int
-var configFile string
+var configPath string
+
+var cachedKey map[string][]string
+var cachedKeyLock sync.Mutex
 
 func init() {
+	cachedKey = make(map[string][]string)
+
 	flag.StringVar(&serverHost, "host", "localhost", "host to listen on")
 	flag.IntVar(&serverPort, "port", 8000, "port to listen on")
-	flag.StringVar(&configFile, "file", "keys.txt", "file containing keys")
+	flag.StringVar(&configPath, "path", "keys.txt", "file containing keys")
 	flag.Parse()
-	content, err := os.ReadFile(configFile)
-	if err != nil {
-		fmt.Println("Error reading file:", err)
-		return
-	}
-	keys = strings.Split(string(content), "\n")
+
+    // configPath is not end with "/"
+    if !strings.HasSuffix(configPath, "/") {
+        configPath += "/"
+    }
+
 }
 
-func index(w http.ResponseWriter, request *http.Request) {
+func index(w http.ResponseWriter, r *http.Request) {
+
+    var configFile string
+    file := r.Header["X-Keys-File"]
+    if file != nil && len(file) > 0 {
+        configFile = configPath + file[0]
+    } else {
+        configFile = configPath + "keys.txt"
+    }
+
+    keys := cachedKey[configFile]
+    if keys == nil || len(keys) == 0 {
+        cachedKeyLock.Lock()
+        defer cachedKeyLock.Unlock()
+        // Read keys from the specified file
+        if _, exists := cachedKey[configFile]; exists {
+            keys = cachedKey[configFile]
+        } else {
+            content, err := os.ReadFile(configFile)
+            if err != nil {
+                fmt.Println("Error reading file:", err)
+                return
+            }
+            keys = strings.Split(string(content), "\n")
+            cachedKey[configFile] = keys
+        }
+
+    }
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
