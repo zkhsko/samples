@@ -131,6 +131,14 @@ func index(w http.ResponseWriter, r *http.Request) {
                 return
             }
             keys = strings.Split(string(content), "\n")
+
+            // Remove empty keys
+			for i := len(keys) - 1; i >= 0; i-- {
+				if strings.TrimSpace(keys[i]) == "" {
+					keys = append(keys[:i], keys[i+1:]...)
+				}
+			}
+
             cachedKey[configFile] = keys
         }
 
